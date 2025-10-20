@@ -8,12 +8,8 @@ const GEMINI_API_URL = process.env.GEMINI_API_URL || 'https://api.gemini.example
 
 async function callGemini(payload) {
     if (!GEMINI_API_KEY) throw new Error('No GEMINI_API_KEY configured');
-    // Gemini expects API key as query param, not Authorization header
-    const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
-    const headers = { 'Content-Type': 'application/json' };
-    const resp = await axios.post(url, {
-        contents: [{ parts: [{ text: payload.prompt }] }]
-    }, { headers, timeout: 15000 });
+    const headers = { Authorization: `Bearer ${GEMINI_API_KEY}`, 'Content-Type': 'application/json' };
+    const resp = await axios.post(GEMINI_API_URL, payload, { headers, timeout: 15000 });
     return resp.data;
 }
 
@@ -27,9 +23,9 @@ router.get('/summarize/:projectId', async (req, res) => {
             try {
                 const payload = { prompt: `Summarize the following tasks:\n${text}` };
                 const data = await callGemini(payload);
-                // Gemini returns response in data.candidates[0].content.parts[0].text
-                const summary = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-                return res.json({ summary: summary || JSON.stringify(data) });
+                // Try common response fields, fallback to stringified body
+                const summary = data && (data.summary || data.answer || data.outputText || (data.candidates && data.candidates[0] && (data.candidates[0].content || data.candidates[0].message)) || JSON.stringify(data));
+                return res.json({ summary });
             } catch (err) {
                 console.error('Gemini call failed, falling back:', err.message);
             }
@@ -37,7 +33,7 @@ router.get('/summarize/:projectId', async (req, res) => {
 
         // Local fallback summarization (simple)
         const summary = `Project has ${tasks.length} tasks. Top tasks: ${tasks.slice(0, 5).map(t => t.title).join(', ')}`;
-        return res.json({ summary });
+        res.json({ summary });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -58,8 +54,8 @@ router.post('/qa', async (req, res) => {
             try {
                 const payload = { prompt: `Context:\n${context}\n\nQuestion: ${question}` };
                 const data = await callGemini(payload);
-                const answer = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-                return res.json({ answer: answer || JSON.stringify(data) });
+                const answer = data && (data.answer || data.summary || data.outputText || (data.candidates && data.candidates[0] && (data.candidates[0].content || data.candidates[0].message)) || JSON.stringify(data));
+                return res.json({ answer });
             } catch (err) {
                 console.error('Gemini call failed, falling back:', err.message);
             }
@@ -67,7 +63,7 @@ router.post('/qa', async (req, res) => {
 
         // Local heuristic answer
         const answer = `Q: ${question}\nA: I found this in the task - ${task.description || 'No description available.'}`;
-        return res.json({ answer });
+        res.json({ answer });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
